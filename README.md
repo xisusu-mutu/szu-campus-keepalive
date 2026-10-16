@@ -1,6 +1,6 @@
 # 深圳大学校园网保活
 
-一个使用 Python 标准库编写的 Windows 桌面程序，兼容深圳大学宿舍区 Dr.COM 和教学区深澜认证。通过认证接口检查当前账号的在线状态，在需要时登录，不依赖 Selenium、Chrome 或 ChromeDriver。
+一个使用 Python 标准库编写的 Windows 桌面程序，兼容深圳大学宿舍区 Dr.COM 和教学区深澜认证。通过认证接口检查当前账号的在线状态
 
 ## 功能
 
@@ -11,7 +11,6 @@
 - 点击窗口右上角 × 后退到系统托盘，已开启的保活继续运行。
 - 使用 Windows DPAPI 保存密码；日志轮转，认证响应进行脱敏。
 
-本项目不是学校官方客户端。它做的是定时检查与必要时重新登录，不能保证永不掉线，也不能在电脑休眠、关机或网络不可用时继续保活。
 
 ## 环境与启动
 
@@ -68,41 +67,6 @@ szu-campus-keepalive/
 
 `.gitignore` 已排除上述运行数据、测试截图、缓存、虚拟环境和常见本地配置文件。即使密码经过加密，也不要将个人配置提交到仓库。发布截图、问题反馈或新增文件前，仍应检查是否包含账号、密码、IP、MAC、Cookie 等私人信息。
 
-## 测试
-
-原生界面和托盘测试需要可用的 Windows 桌面。先退出所有正在运行的保活实例，再在项目根目录执行：
-
-```powershell
-python -B -m unittest discover -s tests -v
-```
-
-默认测试使用模拟认证数据，不进行真实登录或注销；需要退出实际程序，是为了避免单实例互斥锁及托盘窗口名称与测试冲突。
-
 `tests/smoke_campus_tray.py` 是单独运行的可选检查，会读取本机已保存的配置并访问校园网认证接口；它只检查在线状态，不提交登录、不修改开机启动。它不包含在上面的默认测试命令中。
 
-## 首次推送到 GitHub
 
-这个文件夹只是独立副本，未自动初始化 Git、创建提交、绑定远程仓库或上传。先在 GitHub 创建空仓库，再在本项目根目录打开 PowerShell：
-
-```powershell
-git init -b main
-git rev-parse --show-toplevel
-```
-
-确认输出是 `szu-campus-keepalive` 项目本身，而不是桌面或用户主目录，再准备提交：
-
-```powershell
-git add .
-git diff --cached --stat
-git diff --cached
-```
-
-确认待提交内容不含个人数据后，将下面的地址替换为你自己的仓库地址：
-
-```powershell
-git commit -m "Initial commit"
-git remote add origin "https://github.com/YOUR_USERNAME/YOUR_REPOSITORY.git"
-git push -u origin main
-```
-
-尚未替作者选择开源许可证；需要发布许可证时，再自行添加 `LICENSE` 文件。

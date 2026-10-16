@@ -1,0 +1,38 @@
+# Private runtime settings, credentials and authentication responses.
+/outputs/data/
+settings.json
+last_response.json
+*.log
+*.log.*
+.env
+.env.*
+!.env.example
+
+# Local test screenshots may contain account or network information.
+/tests/artifacts/
+
+# Python bytecode, environments and build output.
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Editor and operating-system files.
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+Desktop.ini
+desktop.ini
+*.tmp
+*.bak

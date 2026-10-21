@@ -126,7 +126,7 @@ def parse_jsonp(text: str) -> dict:
     if not text.startswith('{'):
         match = re.fullmatch(r'[A-Za-z_$][\w.$]*\s*\(\s*(\{.*\})\s*\)\s*;?', text, re.S)
         if not match:
-            raise PortalError('认证接口没有返回可识别的 JSON/JSONP，不能据此判定登录成功。')
+            raise PortalError('认证接口返回格式无效，无法解析 JSON/JSONP。')
         text = match[1]
     try:
         value = json.loads(text)
@@ -390,7 +390,7 @@ class TeachingPortal:
         creator, _ = self.client.get(urllib.parse.urljoin(page_url, html.unescape(scripts[0])))
         crypto = re.search(r'\bcryptography\s*:\s*(true|false)', creator)
         if not crypto:
-            raise PortalError('教学区密码处理配置已变化，请使用网页登录并提供脱敏反馈。')
+            raise PortalError('教学区密码处理配置已变化，请使用网页登录。')
         if crypto[1] == 'true':
             password = base64.b64encode(urllib.parse.quote(password, safe="~!*'()").encode()).decode()
             self.client.redactor.add(password)
@@ -530,9 +530,9 @@ class Engine:
                 self.notify(str(exc))
         for status in online_records:
             if not settings.username or same_account(status.account, settings.username):
-                return self.result(True, 'online', '已确认当前账号在线，无需重复登录。', status)
+                return self.result(True, 'online', '已确认当前账号在线。', status)
         if online_records:
-            return self.result(False, 'other_account', '当前设备已有其他账号在线；本程序不会注销或替换它。', online_records[0])
+            return self.result(False, 'other_account', '当前设备已有其他账号在线。', online_records[0])
         if not allow_login:
             state = 'offline' if available else 'unreachable'
             return self.result(False, state, '未发现当前账号的在线记录。' if available else '两个认证入口均无法确认状态，请检查校园网连接。')
@@ -610,7 +610,7 @@ class SettingsStore:
             config.validate()
             return config
         except (OSError, ValueError, TypeError, AttributeError) as exc:
-            raise ValueError('读取配置失败，原文件未改动。请重新填写并保存设置。' +
+            raise ValueError('读取配置失败，请重新填写并保存设置。' +
                              (' ' + str(exc) if isinstance(exc, ValueError) and not isinstance(exc, json.JSONDecodeError) else '')) from None
 
     def save(self, config: Settings):
@@ -713,10 +713,11 @@ class KeepaliveWorker:
                 engine = Engine(stop=self.stop_event, notify=lambda text: self.emit('log', text))
                 result = engine.check(config, allow_login=self.allow_login)
                 self.emit('result', result)
-                if self.once or result.state in ('needs_attention', 'other_account'):
+                if self.once or result.state == 'needs_attention':
                     break
-                failures = 0 if result.online else failures + 1
-                seconds = config.interval_minutes * 60 if result.online else retry_delay(failures, config.interval_minutes * 60)
+                normal_interval = result.online or result.state == 'other_account'
+                failures = 0 if normal_interval else failures + 1
+                seconds = config.interval_minutes * 60 if normal_interval else retry_delay(failures, config.interval_minutes * 60)
                 # A changed configuration or manual check wakes the wait immediately.
                 self.emit('next', (time.time() + seconds, time.monotonic() + seconds))
                 self.wake_event.wait(seconds)

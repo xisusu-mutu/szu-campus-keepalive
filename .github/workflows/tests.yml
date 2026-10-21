@@ -1,0 +1,29 @@
+name: Offline cross-platform tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ['3.10', '3.12']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install Linux-adapter test dependency
+        run: python -m pip install -r linux/requirements.txt
+      - name: Run isolated offline tests (no campus network or startup changes)
+        run: python -B -m unittest discover -s linux/tests -v

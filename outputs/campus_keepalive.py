@@ -87,6 +87,18 @@ class CampusApp:
         style.configure('TButton', padding=(12, 8))
         style.configure('Accent.TButton', background='#245eda', foreground='white')
         style.map('Accent.TButton', background=[('active', '#174fc6'), ('disabled', '#98a7bf')])
+        style.configure('Startup.TCheckbutton', font=('Microsoft YaHei UI', 10, 'bold'),
+                        background='white', padding=(round(12 * scale), round(10 * scale)),
+                        indicatorsize=round(24 * scale), indicatormargin=(0, 0, round(10 * scale), 0),
+                        indicatorbackground='white', indicatorforeground='white',
+                        upperbordercolor='#64748b', lowerbordercolor='#64748b',
+                        focuscolor='#245eda', focusthickness=2)
+        style.map('Startup.TCheckbutton',
+                  background=[('selected', '#e5edff'), ('active', '#e5edff')],
+                  foreground=[('selected', '#174fc6')],
+                  indicatorbackground=[('selected', '#245eda')],
+                  upperbordercolor=[('selected', '#245eda')],
+                  lowerbordercolor=[('selected', '#245eda')])
         style.configure('Card.TFrame', background='white')
         style.configure('Card.TLabel', background='white')
         style.configure('Status.TLabel', background='white', font=('Microsoft YaHei UI', 19, 'bold'))
@@ -97,7 +109,7 @@ class CampusApp:
         outer = ttk.Frame(root, padding=20)
         outer.pack(fill='both', expand=True)
         ttk.Label(outer, text='校园网保活', font=('Microsoft YaHei UI', 22, 'bold')).pack(anchor='w')
-        ttk.Label(outer, text='自动兼容宿舍区与教学区 · 以认证接口的在线记录为准', style='Small.TLabel').pack(anchor='w', pady=(3, 12))
+        ttk.Label(outer, text='自动兼容宿舍区与教学区', style='Small.TLabel').pack(anchor='w', pady=(3, 12))
 
         cards = ttk.Frame(outer)
         cards.pack(fill='x')
@@ -135,10 +147,12 @@ class CampusApp:
         ttk.Label(config, text='认证区域').grid(row=1, column=2, sticky='w', padx=(0, 8))
         ttk.Combobox(config, textvariable=self.mode, values=list(MODE_LABELS), state='readonly').grid(row=1, column=3, sticky='ew')
         self.startup_checked = tk.BooleanVar(value=False)
-        self.startup_check = ttk.Checkbutton(config, text='登录 Windows 后自动打开并开始保活', variable=self.startup_checked, command=self.toggle_startup)
+        self.startup_label = tk.StringVar(value='开机自动保活：正在检查…')
+        self.startup_check = ttk.Checkbutton(config, textvariable=self.startup_label,
+                                            variable=self.startup_checked, command=self.toggle_startup,
+                                            style='Startup.TCheckbutton', takefocus=True, cursor='hand2')
         self.startup_check.grid(row=2, column=0, columnspan=3, sticky='w')
         ttk.Button(config, text='保存设置', command=self.save).grid(row=2, column=3, sticky='e')
-        ttk.Label(config, text='密码使用 Windows 当前用户加密保存；间隔范围 0.5～1440 分钟。', style='Small.TLabel').grid(row=3, column=0, columnspan=4, sticky='w', pady=(6, 0))
 
         buttons = ttk.Frame(outer)
         buttons.pack(fill='x', pady=(0, 9))
@@ -163,14 +177,7 @@ class CampusApp:
         notebook.pack(fill='both', expand=True)
         self.log_text = scrolledtext.ScrolledText(notebook, height=8, wrap='word', font=('Microsoft YaHei UI', 9),
                                                 bg='white', fg='#26394f', relief='flat', state='disabled')
-        self.capture_text = scrolledtext.ScrolledText(notebook, height=8, wrap='word', font=('Consolas', 10),
-                                                    bg='white', fg='#26394f', relief='flat', state='disabled')
         notebook.add(self.log_text, text='  运行日志  ')
-        notebook.add(self.capture_text, text='  认证响应（脱敏）  ')
-        footer = ttk.Label(outer, text='点右上角 × 隐藏到托盘，已开启的保活继续运行。右键托盘可显示窗口或退出程序。睡眠、关机时无法保活。',
-                           style='Small.TLabel', wraplength=width - 40)
-        footer.pack(anchor='w', pady=(9, 0))
-        outer.bind('<Configure>', lambda event: footer.configure(wraplength=max(200, event.width - 40)))
         # Separate from the window's close button: this actually terminates the app.
         menu = tk.Menu(root)
         program = tk.Menu(menu, tearoff=False)
@@ -233,7 +240,7 @@ class CampusApp:
             self.close(force=True)
         elif action == 'unavailable':
             self.show_window()
-            self.log('托盘图标暂不可用，已恢复窗口；当前保活状态不变。')
+            self.log('托盘图标暂不可用，已恢复窗口。')
 
     def log(self, text):
         text = core.Redactor([self.password.get()]).clean(str(text))
@@ -271,6 +278,10 @@ class CampusApp:
         state = self.startup.state()
         self.startup_checked.set(state == 'enabled')
         self.startup_text.set({'enabled': '已开启', 'disabled': '未开启', 'different': '启动项指向其他位置', 'error': '无法读取状态'}[state])
+        self.startup_label.set('开机自动保活：' + {
+            'enabled': '已开启', 'disabled': '已关闭',
+            'different': '需更新启动项', 'error': '无法读取状态',
+        }[state])
 
     def toggle_startup(self):
         enabled = self.startup_checked.get()
@@ -287,7 +298,7 @@ class CampusApp:
                 return
         try:
             self.startup.set_enabled(enabled)
-            self.log('开机启动已' + ('开启：下次登录 Windows 后自动开始保活。' if enabled else '关闭；不会影响本次运行。'))
+            self.log('开机启动已' + ('开启。' if enabled else '关闭。'))
         except OSError as exc:
             messagebox.showerror('开机启动设置失败', str(exc), parent=self.root)
         self.refresh_startup()
@@ -315,7 +326,7 @@ class CampusApp:
         if self.worker:
             if not self.worker.once:
                 self.worker.check_now()
-                self.log('已请求立即检查；如当前正在请求，完成后再检查，不会并发登录。')
+                self.log('已请求立即检查。')
             return
         if self.save(quiet=True):
             self.launch_worker(once=True)
@@ -326,7 +337,7 @@ class CampusApp:
             self.next_check = None
             self.running_state.set('正在停止（等待当前网络请求结束）…')
             self.stop_button.configure(state='disabled')
-            self.log('已发出停止指令。不会注销校园网，不会关闭其他程序。')
+            self.log('已发出停止指令。')
 
     def show_result(self, result):
         self.last_result = result
@@ -340,18 +351,6 @@ class CampusApp:
             self.account_status.set('未取得可验证的在线记录')
         self.log(result.message)
         self.log('本轮操作完成，系统时间：' + result.checked_at)
-        report = {'checked_at': result.checked_at, 'state': result.state, 'account': result.account,
-                  'portal': result.portal, 'ip': result.ip, 'message': result.message,
-                  'online_response': result.details, 'requests': result.captures}
-        rendered = json.dumps(report, ensure_ascii=False, indent=2)
-        self.capture_text.configure(state='normal')
-        self.capture_text.delete('1.0', 'end')
-        self.capture_text.insert('1.0', rendered)
-        self.capture_text.configure(state='disabled')
-        try:
-            (core.DATA_DIR / 'last_response.json').write_text(rendered, encoding='utf-8')
-        except OSError:
-            self.log('响应已显示，但无法保存到本地文件。')
 
     def poll(self):
         if self.closed:
@@ -419,19 +418,19 @@ class CampusApp:
     def callback_error(self, exc_type, exc_value, traceback):
         self.show_window()
         self.log(f'界面操作失败（{exc_type.__name__}）；请检查设置后重试。')
-        messagebox.showerror('操作失败', f'发生 {exc_type.__name__}，程序未判定登录成功。', parent=self.root)
+        messagebox.showerror('操作失败', f'发生 {exc_type.__name__}，请检查日志后重试。', parent=self.root)
 
     def close(self, force=False):
         if self.closed:
             return
         if self.worker and not self.worker.once and not force:
             self.show_window()
-            if not messagebox.askyesno('停止并退出？', '退出程序将停止保活。\n不会注销校园网；开机启动设置保持不变。\n只想隐藏窗口，请取消后点右上角 ×。', parent=self.root):
+            if not messagebox.askyesno('停止并退出？', '确定停止保活并退出程序吗？', parent=self.root):
                 return
         if self.worker:
             self.worker.stop()
         self.closed = True
-        self.log('程序退出；保活已停止，当前网络登录不受影响。')
+        self.log('程序退出，保活已停止。')
         if self.tray:
             self.tray.close()
         self.logger.removeHandler(self.handler)
@@ -453,7 +452,7 @@ def main():
         lock = core.SingleInstance() if args.once else None
         try:
             if lock and lock.already_running:
-                print('已有保活窗口在运行，请在窗口中点击“立即检查 / 登录”，避免重复提交。')
+                print('已有保活窗口在运行，请在窗口中点击“立即检查 / 登录”。')
                 return 2
             settings = core.SettingsStore().load()
             engine = core.Engine(notify=lambda text: print(core.system_time(), text))

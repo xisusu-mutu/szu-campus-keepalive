@@ -56,6 +56,67 @@ class GuiTests(unittest.TestCase):
         self.root.update()
         self.assertGreaterEqual(self.app.log_text.winfo_height(), 140)
 
+    def test_startup_control_is_large_and_keyboard_focusable(self):
+        scale = max(1.0, self.root.winfo_fpixels('1i') / 96)
+        control = self.app.startup_check
+        style = gui.ttk.Style(self.root)
+        self.assertEqual(control.cget('style'), 'Startup.TCheckbutton')
+        self.assertGreaterEqual(int(style.lookup('Startup.TCheckbutton', 'indicatorsize')), round(24 * scale))
+        self.assertGreaterEqual(control.winfo_reqheight(), round(44 * scale) - 1)
+        self.assertEqual(str(control.cget('takefocus')), '1')
+
+    def test_startup_control_displays_actual_state_in_words(self):
+        for state, text in (('disabled', '已关闭'), ('enabled', '已开启'),
+                            ('different', '需更新启动项'), ('error', '无法读取状态')):
+            with self.subTest(state=state):
+                self.startup.state.return_value = state
+                self.app.refresh_startup()
+                self.assertEqual(self.app.startup_label.get(), '开机自动保活：' + text)
+                self.assertEqual(self.app.startup_check.instate(['selected']), state == 'enabled')
+        self.startup.set_enabled.assert_not_called()
+
+    def test_startup_control_padding_click_and_space_toggle(self):
+        def store_enabled(enabled):
+            self.startup.state.return_value = 'enabled' if enabled else 'disabled'
+        self.startup.set_enabled.side_effect = store_enabled
+        self.root.deiconify()
+        self.root.update()
+        control = self.app.startup_check
+        x, y = control.winfo_width() - 4, control.winfo_height() // 2
+        control.event_generate('<ButtonPress-1>', x=x, y=y)
+        control.event_generate('<ButtonRelease-1>', x=x, y=y)
+        self.root.update()
+        self.startup.set_enabled.assert_called_once_with(True)
+        self.assertEqual(self.app.startup_label.get(), '开机自动保活：已开启')
+        control.focus_force()
+        self.root.update()
+        control.event_generate('<KeyPress-space>')
+        control.event_generate('<KeyRelease-space>')
+        self.root.update()
+        self.assertEqual(self.startup.set_enabled.call_count, 2)
+        self.startup.set_enabled.assert_called_with(False)
+        self.assertEqual(self.app.startup_label.get(), '开机自动保活：已关闭')
+
+    def test_startup_control_restores_actual_state_if_write_fails(self):
+        self.startup.set_enabled.side_effect = OSError('test write failure')
+        with patch.object(gui.messagebox, 'showerror') as error:
+            self.app.startup_check.invoke()
+        error.assert_called_once()
+        self.assertFalse(self.app.startup_check.instate(['selected']))
+        self.assertEqual(self.app.startup_label.get(), '开机自动保活：已关闭')
+
+    def test_window_omits_explanatory_labels(self):
+        pending, labels = [self.root], []
+        while pending:
+            widget = pending.pop()
+            pending.extend(widget.winfo_children())
+            if isinstance(widget, gui.ttk.Label):
+                labels.append(str(widget.cget('text')))
+        text = '\n'.join(labels)
+        for phrase in ('以认证接口的在线记录为准', '密码使用 Windows 当前用户',
+                       '点右上角 × 隐藏到托盘', '睡眠、关机时无法保活'):
+            self.assertNotIn(phrase, text)
+
     def test_startup_checkbox_can_enable_and_disable(self):
         self.app.startup_checked.set(True)
         self.app.toggle_startup()
@@ -63,6 +124,38 @@ class GuiTests(unittest.TestCase):
         self.app.startup_checked.set(False)
         self.app.toggle_startup()
         self.startup.set_enabled.assert_called_with(False)
+
+    def test_autostart_launch_starts_continuous_keepalive_with_saved_settings(self):
+        self.app.close(force=True)
+        self.root = tk.Tk()
+        self.root.withdraw()
+        worker = Mock(once=False)
+        with patch.object(self.root, 'after') as schedule, \
+                patch.object(core, 'KeepaliveWorker', return_value=worker) as factory:
+            self.app = gui.CampusApp(self.root, autostart=True)
+            callbacks = [call.args[1] for call in schedule.call_args_list if call.args[0] == 300]
+            self.assertEqual(callbacks, [self.app.start])
+            callbacks[0]()
+        worker.start.assert_called_once()
+        self.assertEqual(factory.call_args.args[2:], (False, True))
+        self.assertEqual(factory.call_args.args[0], self.store.load.return_value)
+        self.assertTrue(self.app.autostart)
+        self.assertIn('随 Windows 登录自动启动', self.app.log_text.get('1.0', 'end'))
+        self.startup.set_enabled.assert_not_called()
+
+    def test_other_account_keeps_running_and_shows_next_check(self):
+        worker = Mock(once=False)
+        with patch.object(core, 'KeepaliveWorker', return_value=worker):
+            self.app.start()
+        self.app.events.put(('result', core.CheckResult(False, 'other_account', 'other')))
+        self.app.events.put(('next', (10180.0, 1180.0)))
+        self.app.poll()
+        self.assertIs(self.app.worker, worker)
+        self.assertIn('运行中', self.app.running_state.get())
+        self.assertEqual(self.app.login_state.get(), '其他账号在线')
+        self.assertEqual(self.app.next_check, (10180.0, 1180.0))
+        self.assertEqual(str(self.app.stop_button.cget('state')), 'normal')
+        worker.stop.assert_not_called()
 
     def test_interval_save_updates_worker(self):
         self.app.interval.set('2.5')
@@ -90,14 +183,27 @@ class GuiTests(unittest.TestCase):
         self.assertEqual(self.app.login_state.get(), '已停止检查')
         self.assertIn('已停止', self.app.running_state.get())
 
-    def test_online_status_and_capture_are_displayed(self):
+    def test_online_status_and_logs_are_kept_without_saved_response(self):
         result = core.CheckResult(True, 'online', '已确认在线', 'teaching', 'test', '172.31.1.2',
-                                  {'error':'ok'}, checked_at='2026-10-10 15:00:00 +0800')
+                                  {'error':'raw-response-detail'}, checked_at='2026-10-10 15:00:00 +0800')
         self.app.show_result(result)
         self.assertIn('成功登录', self.app.login_state.get())
         self.assertIn('172.31.1.2', self.app.account_status.get())
-        self.assertIn('online_response', self.app.capture_text.get('1.0', 'end'))
-        self.assertTrue((Path(self.temp.name) / 'last_response.json').exists())
+        self.assertFalse(hasattr(self.app, 'capture_text'))
+        logs = self.app.log_text.get('1.0', 'end')
+        self.assertIn('已确认在线', logs)
+        self.assertIn('2026-10-10 15:00:00 +0800', logs)
+        self.assertNotIn('raw-response-detail', logs)
+        self.assertFalse((Path(self.temp.name) / 'last_response.json').exists())
+
+    def test_response_tab_is_removed(self):
+        pending, tabs = [self.root], []
+        while pending:
+            widget = pending.pop()
+            pending.extend(widget.winfo_children())
+            if isinstance(widget, gui.ttk.Notebook):
+                tabs.extend(str(widget.tab(tab, 'text')).strip() for tab in widget.tabs())
+        self.assertEqual(tabs, ['运行日志'])
 
     def test_clock_uses_system_time_and_running_worker_can_be_woken(self):
         with patch.object(core, 'system_time', return_value='2026-10-10 16:00:00 +0800'):

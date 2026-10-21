@@ -1,20 +1,27 @@
 # 深圳大学校园网保活
 
-一个使用 Python 标准库编写的 Windows 桌面程序，兼容深圳大学宿舍区 Dr.COM 和教学区深澜认证。通过认证接口检查当前账号的在线状态
+支持 Windows 和 Linux 的深圳大学校园网保活项目，兼容宿舍区 Dr.COM 和教学区深澜认证。Linux 教学区使用学校官方 `portal`，宿舍区认证与在线状态查询复用公共模块。
+
+| | Windows 桌面版 | Linux 版 |
+| --- | --- | --- |
+| 界面 | Tkinter 窗口与系统托盘 | 应用图标打开网页面板，也支持 SSH 隧道访问 |
+| 入口 | `outputs/campus_keepalive.py` | `linux/campus_linux.py` |
+| 后台与自启 | 系统托盘、用户登录启动项 | systemd 用户服务、Linger 开机运行 |
+| 密码保存 | Windows DPAPI | Fernet |
 
 ## 功能
 
-- 图形界面显示最近一次登录状态、系统时间、下次检查时间及认证响应。
-- 自动识别两种认证入口，也可以手动选择认证区域。
-- 保活间隔可设置为 0.5～1440 分钟，默认 15 分钟。
-- 支持当前 Windows 用户登录后自动启动，界面可查看和切换启动项状态。
-- 点击窗口右上角 × 后退到系统托盘，已开启的保活继续运行。
-- 使用 Windows DPAPI 保存密码；日志轮转，认证响应进行脱敏。
+- 自动识别教学区与宿舍区，也可手动选择认证区域。
+- 显示登录状态、系统时间、下次检查时间和运行日志。
+- 保活间隔为 0.5～1440 分钟，默认 15 分钟。
+- 其他账号在线时继续保活，按同一间隔等待检查；对方离线后再登录，不注销或替换其他账号。
+- 开机启动状态与复选框，支持开始、停止和立即检查。
+- Windows 托盘运行，Linux 后台服务与桌面入口。
+- 带时间戳的运行日志和日志轮转。
 
+## Windows 环境与启动
 
-## 环境与启动
-
-当前版本已在 Windows、Python 3.12.7 环境中运行验证。Python 需要带有 `tkinter`，没有需要通过 pip 安装的第三方依赖。
+需要带有 `tkinter` 的 Python。已在 Windows、Python 3.12.7 环境中验证。
 
 在项目根目录打开 PowerShell：
 
@@ -22,18 +29,44 @@
 python .\outputs\campus_keepalive.py
 ```
 
-也可以双击 `outputs/启动校园网保活.vbs`；如果看不到窗口，用 `outputs/排错启动.bat` 查看错误。启动文件保持原样：优先使用 `D:\Anaconda` 中的 Python，否则使用 `pyw -3` / `py -3`。如果你的 Python 安装位置或命令不同，直接使用上面的 `python` 命令，或调整自己副本中的启动文件。
+也可以双击 `outputs/启动校园网保活.vbs`。启动文件优先使用 `D:\Anaconda` 中的 Python，否则使用 `pyw -3` / `py -3`；其他安装位置可直接使用上面的命令，或调整启动文件。
 
-首次运行需要输入自己的校园网账号、密码，保存后点击“开始保活”。普通双击启动只做一次状态检查，不会自动开始定时保活；Windows 启动项启动则会自动开始。
+首次运行填写校园网账号、密码，保存后点击“开始保活”。普通启动先检查一次状态；通过 Windows 启动项启动时自动开始保活。
 
-- 点 ×：隐藏到托盘，继续已经开启的保活。
-- 托盘“显示窗口”：恢复界面。
-- “停止保活”：停止定时检查，不注销校园网。
-- 托盘或“程序”菜单中的“退出程序（停止保活）”：彻底退出。
+| 操作 | 用途 |
+| --- | --- |
+| 窗口右上角 × | 隐藏到托盘 |
+| 托盘“显示窗口” | 恢复界面 |
+| “停止保活” | 停止定时检查 |
+| 托盘或“程序”菜单的“退出程序” | 停止保活并退出 |
 
-同一 Windows 会话中只允许运行一个保活实例。原位置的程序还在运行时，启动这份副本会尝试恢复原窗口，不会另外启动第二份。若要迁移使用新位置，应先自行退出旧实例，在新位置重新输入账号，并重新设置开机启动。
+移动项目后，在新位置重新设置开机启动。启动遇到问题时使用 `outputs/排错启动.bat` 查看错误。
 
-完整操作说明见 [使用说明](outputs/使用说明.md)。
+完整操作见 [Windows 使用说明](outputs/使用说明.md)。
+
+## Linux 环境与启动
+
+学校官方说明与下载入口：**[教学办公区Linux用户脚本认证指南（深圳大学信息中心）](https://www1.szu.edu.cn/nc/view.asp?id=639)**。
+
+按 [Linux 使用说明](linux/README.md) 准备 Python 3.10+、依赖和官方 `portal` 客户端。官方客户端适用于 Linux x86-64。
+
+Linux 桌面用户在完整仓库根目录，以当前用户执行：
+
+```bash
+python3 linux/campus_linux.py install --desktop --open
+```
+
+以后在应用菜单搜索 **SZU 校园网保活**，或双击桌面快捷方式，即可打开面板。首次填写账号、密码和间隔，保存后点击“开始保活”；需要自启时勾选复选框。桌面快捷方式首次启动可能需要右键选择“允许启动”。
+
+无图形桌面的主机使用命令行：
+
+```bash
+python3 linux/campus_linux.py portal-info
+python3 linux/campus_linux.py configure
+python3 linux/campus_linux.py install --enable --start
+```
+
+后台服务需要 systemd 用户管理器，免登录开机运行需启用 Linger。默认面板地址为 `http://127.0.0.1:8765`；远程访问、日常控制和卸载命令见 [Linux 使用说明](linux/README.md)。
 
 ## 项目结构
 
@@ -41,32 +74,50 @@ python .\outputs\campus_keepalive.py
 szu-campus-keepalive/
 ├── README.md
 ├── .gitignore
+├── .gitattributes                # 跨平台换行约定
+├── .github/workflows/tests.yml   # Windows / Ubuntu 测试
 ├── outputs/
-│   ├── campus_keepalive.py       # 窗口、状态展示与程序入口
-│   ├── campus_core.py            # 认证、配置、启动项与保活调度
-│   ├── campus_tray.py            # Windows 原生系统托盘
+│   ├── campus_keepalive.py       # Windows 界面与程序入口
+│   ├── campus_core.py            # 公共认证、配置与调度
+│   ├── campus_tray.py            # Windows 系统托盘
 │   ├── 启动校园网保活.vbs
 │   ├── 排错启动.bat
 │   └── 使用说明.md
-└── tests/
-    ├── test_campus_keepalive.py   # 认证与调度离线测试
-    ├── test_campus_gui.py         # 界面行为测试
-    ├── test_campus_tray.py        # Windows 原生托盘测试
-    └── smoke_campus_tray.py       # 可选的真实网络只读检查
+├── linux/
+│   ├── campus_linux.py           # 后台、面板与命令行入口
+│   ├── auth_linux.py             # 官方客户端适配与调度
+│   ├── platform_linux.py         # 配置与 systemd 自启
+│   ├── desktop_linux.py          # 桌面入口与面板连接
+│   ├── requirements.txt
+│   ├── README.md
+│   ├── web/                      # 网页界面
+│   └── tests/                    # Linux 与公共模块测试
+└── tests/                        # 公共模块与 Windows 界面测试
 ```
 
-保留 `outputs/` 与 `tests/` 的原有相对位置，启动文件、源码和测试无需改路径。三个应用 Python 文件必须放在同一目录。
+安装时保留完整仓库结构，Linux 会使用 `outputs/campus_core.py`，Windows 的三个应用 Python 文件需位于同一目录。
 
-## 配置与隐私
+## Git / GitHub 跨平台维护
 
-本项目副本只包含源码、启动文件、说明和测试，不包含个人账号配置、日志或截图。程序首次保存或运行时会自行生成 `outputs/data/`。
+两个平台放在同一个仓库、同一条主分支，按操作系统选择入口。公共状态查询和宿舍区认证在 `outputs/campus_core.py`；Linux 教学区适配、界面、配置与自启在 `linux/`；Windows 界面和托盘在 `outputs/`。
 
-- `settings.json`：账号与加密后的密码等本机设置。
+安装 `linux/requirements.txt` 后运行跨平台回归测试：
+
+```bash
+python -B -m unittest discover -s linux/tests -v
+```
+
+GitHub Actions 使用 Windows / Ubuntu、Python 3.10 / 3.12 测试矩阵。推送后在仓库的 Actions 页面查看结果。`.gitattributes` 约定 Python 与网页源码使用 LF，Windows 启动文件使用 CRLF。
+
+## 配置与日志
+
+Windows 运行数据位于 `outputs/data/`：
+
+- `settings.json`：账号、加密密码、区域与间隔。
 - `keepalive.log` 及轮转文件：运行日志。
-- `last_response.json`：最近一次认证响应，可能包含账号和 IP。
 
-`.gitignore` 已排除上述运行数据、测试截图、缓存、虚拟环境和常见本地配置文件。即使密码经过加密，也不要将个人配置提交到仓库。发布截图、问题反馈或新增文件前，仍应检查是否包含账号、密码、IP、MAC、Cookie 等私人信息。
+Linux 配置位于 `~/.config/szu-campus-keepalive/`，日志和状态位于 `~/.local/state/szu-campus-keepalive/`。完整文件列表见 [Linux 配置与日志](linux/README.md#配置与日志)。`.gitignore` 已配置运行数据、缓存、截图和虚拟环境的排除规则。
 
-`tests/smoke_campus_tray.py` 是单独运行的可选检查，会读取本机已保存的配置并访问校园网认证接口；它只检查在线状态，不提交登录、不修改开机启动。它不包含在上面的默认测试命令中。
+手动查询真实认证状态可运行 Windows 的 `tests/smoke_campus_tray.py`，或 Linux 的 `python3 linux/campus_linux.py probe`。
 
 

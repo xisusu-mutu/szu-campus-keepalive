@@ -2,6 +2,17 @@
 /outputs/data/
 settings.json
 last_response.json
+secret.key
+ui.token
+server.json
+run_state.json
+instance.lock
+last_launcher_error.txt
+szu-campus-keepalive.desktop
+# Official client is downloaded separately; do not redistribute its binary/cache.
+portal
+portal.rar
+.srun_portal.json
 *.log
 *.log.*
 .env
@@ -10,6 +21,10 @@ last_response.json
 
 # Local test screenshots may contain account or network information.
 /tests/artifacts/
+/linux/tests/artifacts/
+
+# Local deployment helpers may contain host-specific information.
+/work/
 
 # Python bytecode, environments and build output.
 __pycache__/

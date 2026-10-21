@@ -217,6 +217,60 @@ class StartupTests(unittest.TestCase):
 
 
 class WorkerTests(unittest.TestCase):
+    def test_login_waits_until_other_account_goes_offline(self):
+        for name in ('teaching', 'dorm'):
+            with self.subTest(portal=name):
+                portal = FakePortal(name, [online(name, 'someone'), online(name, 'someone'),
+                                          offline(name), online(name)])
+                factory, events, login_counts = core.Engine, [], []
+                def emit(event, value):
+                    events.append((event, value))
+                    if event == 'result':
+                        login_counts.append(portal.logins)
+                    if event == 'next' and len(login_counts) == 3:
+                        worker.stop()
+                worker = core.KeepaliveWorker(core.Settings('test', 'fake-secret', 3), emit)
+                def make_engine(**kwargs):
+                    return factory(portals=[portal], verification_wait=0, **kwargs)
+                with patch.object(core, 'Engine', side_effect=make_engine), \
+                        patch.object(worker.wake_event, 'wait', return_value=False), \
+                        patch.object(core.time, 'time', return_value=10000.0), \
+                        patch.object(core.time, 'monotonic', return_value=1000.0):
+                    worker.run()
+                self.assertEqual([v.state for n, v in events if n == 'result'],
+                                 ['other_account', 'other_account', 'online'])
+                self.assertEqual(login_counts, [0, 0, 1])
+                self.assertEqual([v for n, v in events if n == 'next'], [(10180.0, 1180.0)] * 3)
+
+    def test_other_account_one_shot_does_not_start_periodic_checks(self):
+        events, engine = [], Mock()
+        engine.check.return_value = core.CheckResult(False, 'other_account', 'other')
+        worker = core.KeepaliveWorker(core.Settings('test', 'fake-secret'),
+                                     lambda n, v: events.append(n), once=True)
+        with patch.object(core, 'Engine', return_value=engine):
+            worker.run()
+        self.assertEqual(events, ['checking', 'result', 'done'])
+
+    def test_other_account_waits_for_configured_keepalive_interval(self):
+        received = []
+        def emit(name, value):
+            received.append((name, value))
+            if name == 'next':
+                worker.stop()
+        worker = core.KeepaliveWorker(core.Settings('test', 'fake-secret', 2.5), emit)
+        fake = Mock()
+        fake.check.return_value = core.CheckResult(False, 'other_account', 'other')
+        with patch.object(core, 'Engine', return_value=fake), \
+                patch.object(core.time, 'time', return_value=10000.0), \
+                patch.object(core.time, 'monotonic', return_value=1000.0):
+            worker.start()
+            worker.thread.join(2)
+            worker.stop()
+        self.assertFalse(worker.thread.is_alive())
+        self.assertIn(('next', (10150.0, 1150.0)), received)
+        self.assertEqual(fake.check.call_count, 1)
+        self.assertEqual(received[-1][0], 'done')
+
     def test_stop_interrupts_fifteen_minute_wait(self):
         received=[]
         def emit(name,value):

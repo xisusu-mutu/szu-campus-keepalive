@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>校园网保活 · Linux</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+<main>
+  <header class="page-header">
+    <div><p class="eyebrow">SZU · LINUX</p><h1>校园网保活</h1><p class="subtle">教学区与宿舍区，统一管理。</p></div>
+    <span class="badge" id="connection">面板未连接</span>
+  </header>
+  <section class="card" id="login-panel">
+    <h2>连接管理面板</h2>
+    <p>桌面用户：点击应用菜单或桌面的“SZU 校园网保活”图标，即可自动打开并连接，无需复制令牌。</p>
+    <details><summary>手动连接 / 无桌面主机</summary>
+      <p>在运行保活程序的主机上执行 <code>python3 linux/campus_linux.py token</code> 获取管理令牌。远程访问请使用 SSH 隧道。</p>
+    </details>
+    <form id="connect-form">
+      <label for="token">管理令牌</label>
+      <div class="row"><input id="token" type="password" required autocomplete="off" spellcheck="false"><button type="submit">连接</button></div>
+    </form>
+  </section>
+  <p id="notice" role="status" aria-live="polite"></p>
+  <div id="dashboard" hidden>
+    <section class="status-grid" aria-label="运行概况">
+      <article class="card"><p class="eyebrow">认证状态</p><h2 id="login-status">尚未检查</h2><p id="login-message" class="subtle"></p><p id="identity" class="small"></p></article>
+      <article class="card"><p class="eyebrow">后台保活</p><h2 id="run-status">—</h2><p id="next-check" class="subtle"></p><p id="launch" class="small"></p></article>
+      <article class="card"><p class="eyebrow">开机启动</p><h2 id="boot-status">—</h2><label class="checkbox"><input id="autostart" type="checkbox">启用用户服务启动项</label><p id="boot-detail" class="small"></p></article>
+    </section>
+    <section class="card">
+      <div class="section-heading"><h2>运行控制</h2><span id="system-time" class="small"></span></div>
+      <div class="actions"><button id="start">开始保活</button><button id="check" class="secondary">立即检查 / 登录</button><button id="stop" class="secondary">停止保活</button><button id="exit" class="danger">退出后台程序</button></div>
+    </section>
+    <section class="card">
+      <div class="section-heading"><h2>登录与间隔</h2><span id="saved-config" class="small"></span></div>
+      <form id="settings-form">
+        <div class="form-grid">
+          <label>校园网账号<input id="username" required maxlength="256" autocomplete="username"></label>
+          <label>校园网密码<input id="password" type="password" maxlength="4096" autocomplete="new-password" placeholder="留空保留已保存的密码"></label>
+          <label>认证区域<select id="mode"><option value="auto">自动兼容教学区与宿舍区</option><option value="teaching">仅教学区 / 深澜</option><option value="dorm">仅宿舍区 / Dr.COM</option></select></label>
+          <label>正常保活间隔（分钟）<input id="interval" type="number" min="0.5" max="1440" step="any" value="15" required></label>
+        </div>
+        <div class="actions"><button type="submit">保存并应用</button></div>
+      </form>
+    </section>
+    <section class="card">
+      <details open><summary>运行日志</summary><pre id="logs" class="log" tabindex="0"></pre></details>
+    </section>
+    <footer><span>SZU 校园网保活 · Linux</span><button id="disconnect" class="text-button">断开面板连接</button></footer>
+  </div>
+</main>
+</body>
+</html>

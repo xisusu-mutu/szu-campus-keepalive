@@ -1,0 +1,3 @@
+# Ubuntu's python3-cryptography and python3-pexpect packages are also supported.
+cryptography>=41
+pexpect>=4.9,<5

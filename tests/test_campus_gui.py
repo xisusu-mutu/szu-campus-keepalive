@@ -37,6 +37,11 @@ class GuiTests(unittest.TestCase):
         self.root = tk.Tk()
         self.root.withdraw()
         self.root.tk.call('tk', 'scaling', 2.0)  # Reproduce the user's 144-DPI fonts.
+        # Pair the high-DPI fixture with a fixed desktop size. CI may expose a
+        # 768-pixel desktop, which tests screen clipping instead of DPI sizing.
+        self.root.maxsize(1920, 1080)
+        self.root.winfo_screenwidth = Mock(return_value=1920)
+        self.root.winfo_screenheight = Mock(return_value=1080)
         self.app = gui.CampusApp(self.root, initial_probe=False)
         self.root.update_idletasks()
 

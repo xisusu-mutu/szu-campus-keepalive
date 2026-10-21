@@ -16,7 +16,8 @@ import stat
 import sys
 import time
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'outputs'))
+if not (Path(__file__).resolve().parent / 'campus_core.py').is_file():
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'outputs'))
 import campus_core as core
 
 OFFICIAL_GUIDE = 'https://www1.szu.edu.cn/nc/view.asp?id=639'
@@ -69,7 +70,7 @@ def client_status():
     try:
         verified_binary()
         if importlib.util.find_spec('pexpect') is None:
-            raise core.PortalError('缺少 pexpect；请安装 linux/requirements.txt 中的依赖。')
+            raise core.PortalError('缺少 pexpect；请在 Linux 程序目录运行 python3 -m pip install -r requirements.txt。')
         return {'ready': True, 'name': '学校官方 portal',
                 'message': '学校官方 portal 已就绪。'}
     except core.PortalError as exc:
@@ -97,7 +98,7 @@ def run_official(binary, url, username, password, stop, *, spawn=None, timeout=4
     try:
         import pexpect
     except ImportError:
-        raise core.PortalError('缺少 pexpect；请安装 linux/requirements.txt 中的依赖。') from None
+        raise core.PortalError('缺少 pexpect；请在 Linux 程序目录运行 python3 -m pip install -r requirements.txt。') from None
     if any(ord(c) < 32 or ord(c) == 127 for c in username + password):
         raise core.CredentialsError('账号密码含终端控制字符，未发送；请检查配置。')
     if stop.is_set():

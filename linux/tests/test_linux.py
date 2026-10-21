@@ -470,7 +470,8 @@ class WebTests(ControllerCase):
         self.assertEqual(self.request('/api/exit')[0], 404)
         self.assertFalse(self.exit_event.is_set())
         self.assertEqual(self.request('/api/exit', 'POST', {})[0], 200)
-        self.assertTrue(self.exit_event.is_set())
+        # The handler acknowledges the request before signalling shutdown.
+        self.assertTrue(self.exit_event.wait(2))
 
     def test_no_public_bind(self):
         with self.assertRaises(ValueError): app.LocalServer(('0.0.0.0', 0), self.controller, self.token, self.exit_event)

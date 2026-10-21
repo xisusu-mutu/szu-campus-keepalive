@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""Linux keepalive daemon, loopback-only UI and management CLI.
-
-The Windows program is left intact; both launchers import outputs/campus_core.py.
-"""
+"""Linux keepalive daemon, loopback-only UI and management CLI."""
 from __future__ import annotations
 
 import argparse
@@ -26,7 +23,9 @@ import time
 import urllib.error
 import urllib.request
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'outputs'))
+if not (Path(__file__).resolve().parent / 'campus_core.py').is_file():
+    # Source checkout; the standalone Linux package keeps the shared core here.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'outputs'))
 import campus_core as core
 import auth_linux
 import desktop_linux
@@ -529,7 +528,7 @@ def parse_args(argv=None):
 def main(argv=None):
     args = parse_args(argv)
     if not sys.platform.startswith('linux'):
-        raise ValueError('此启动器只用于 Linux；Windows 请运行 outputs/campus_keepalive.py。')
+        raise ValueError('此启动器只用于 Linux；Windows 请下载 Windows 版并运行 campus_keepalive.py。')
     paths = Paths.default()
     store, startup = LinuxSettingsStore(paths), AutoStart(paths)
     if args.command == 'run':

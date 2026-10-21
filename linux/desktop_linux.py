@@ -171,7 +171,7 @@ def open_panel(paths, startup, request, opener=open_browser, clock=time.monotoni
     except BackendUnavailable:
         unit = paths.unit
         if unit.is_symlink() or not unit.is_file() or not unit.read_text(encoding='utf-8').startswith(UNIT_MARKER + '\n'):
-            raise ValueError('尚未安装本项目的后台服务，请在项目目录运行 python3 linux/campus_linux.py install --desktop --open。') from None
+            raise ValueError('尚未安装本项目的后台服务，请在 Linux 程序目录运行 python3 campus_linux.py install --desktop --open。') from None
         # systemd coalesces concurrent starts; never call Controller.start() here.
         startup.command(['systemctl', '--user', 'start', '--no-block', UNIT_NAME])
         deadline = clock() + START_TIMEOUT

@@ -18,7 +18,8 @@ import time
 
 from cryptography.fernet import Fernet, InvalidToken
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'outputs'))
+if not (Path(__file__).resolve().parent / 'campus_core.py').is_file():
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'outputs'))
 from campus_core import Settings
 
 APP_NAME = 'szu-campus-keepalive'

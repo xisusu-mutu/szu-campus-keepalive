@@ -1,4 +1,4 @@
-name: Offline cross-platform tests
+name: Tests and platform downloads
 
 on:
   push:
@@ -27,7 +27,54 @@ jobs:
         run: python -m pip install -r linux/requirements.txt
       - name: Run isolated offline tests (no campus network or startup changes)
         run: python -B -m unittest discover -s linux/tests -v
+      - name: Test independent platform downloads
+        run: python -B -m unittest discover -s tests -p test_packages.py -v
       - name: Test Windows state restore and GUI with fake workers and startup stores
         if: runner.os == 'Windows'
         working-directory: tests
-        run: python -B -m unittest test_campus_gui test_campus_keepalive.PersistenceTests test_campus_keepalive.StartupTests.test_only_our_startup_entry_changes_and_state_is_read_back -v
+        run: |
+          python -B -m unittest test_campus_gui test_campus_keepalive.PersistenceTests test_campus_keepalive.StartupTests.test_only_our_startup_entry_changes_and_state_is_read_back -v 2>&1 | Tee-Object -Variable testOutput
+          if ($LASTEXITCODE -ne 0) {
+            $failure = ($testOutput | Select-Object -Last 50) -join "`n"
+            $failure = $failure.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error::$failure"
+            exit 1
+          }
+
+  publish:
+    needs: offline
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: platform-downloads
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Build Windows and Linux packages
+        run: python -B tools/build_packages.py
+      - name: Publish platform downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          tag="build-${GITHUB_SHA:0:12}"
+          title="$(git log -1 --format=%s)"
+          notes='Windows 用户下载 szu-campus-keepalive-windows.zip；Linux 用户下载 szu-campus-keepalive-linux.tar.gz。每个包已包含对应平台所需代码和使用说明，无须下载 Source code。'
+          if gh release view "$tag" --json isDraft --jq '.isDraft' > release-draft.txt; then
+            if [ "$(cat release-draft.txt)" = 'false' ]; then
+              echo "Platform downloads already published for this commit."
+              exit 0
+            fi
+          else
+            gh release create "$tag" --target "$GITHUB_SHA" --title "$title" --notes "$notes" --draft
+          fi
+          gh release upload "$tag" dist/szu-campus-keepalive-windows.zip dist/szu-campus-keepalive-linux.tar.gz --clobber
+          gh release edit "$tag" --draft=false --latest

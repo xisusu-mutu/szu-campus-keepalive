@@ -117,6 +117,43 @@ class PersistenceTests(unittest.TestCase):
             self.assertEqual(store.load().password,'fake-password')
             self.assertEqual(store.load().interval_minutes,2.5)
 
+class RunStateTests(unittest.TestCase):
+    def test_existing_install_without_state_defaults_to_enabled_without_writing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'run_state.json'
+            self.assertTrue(core.RunStateStore(path).load())
+            self.assertFalse(path.exists())
+
+    def test_both_switch_values_round_trip_and_contain_no_settings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'data' / 'run_state.json'
+            for enabled in (True, False, True):
+                core.RunStateStore(path).save(enabled)
+                self.assertIs(core.RunStateStore(path).load(), enabled)
+                self.assertEqual(json.loads(path.read_text()), {'keepalive_enabled': enabled})
+                self.assertFalse(path.with_suffix('.tmp').exists())
+
+    def test_corrupt_or_non_boolean_state_is_not_silently_overwritten(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'run_state.json'
+            for value in ('{broken', '[]', '{}', 'null', '{"keepalive_enabled": "false"}',
+                          '{"keepalive_enabled": 1}'):
+                with self.subTest(value=value):
+                    path.write_text(value, encoding='utf-8')
+                    with self.assertRaises(ValueError):
+                        core.RunStateStore(path).load()
+                    self.assertEqual(path.read_text(), value)
+
+    def test_failed_replace_preserves_previous_switch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = core.RunStateStore(Path(tmp) / 'run_state.json')
+            store.save(False)
+            with patch.object(core.os, 'replace', side_effect=OSError('disk failure')):
+                with self.assertRaises(OSError):
+                    store.save(True)
+            self.assertFalse(store.load())
+
+
 class ProtocolTests(unittest.TestCase):
     def test_numeric_account_errors_also_pause_instead_of_hammering(self):
         for code in ('E2531','E2533','E2553','E2536','E2606'):

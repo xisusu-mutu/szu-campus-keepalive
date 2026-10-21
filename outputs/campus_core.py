@@ -624,6 +624,31 @@ class SettingsStore:
         os.replace(temporary, self.path)
 
 
+class RunStateStore:
+    """Remember the keepalive switch separately from credentials and startup registration."""
+    def __init__(self, path=None):
+        self.path = Path(path) if path is not None else DATA_DIR / 'run_state.json'
+
+    def load(self) -> bool:
+        try:
+            value = json.loads(self.path.read_text(encoding='utf-8'))
+            if not isinstance(value, dict) or type(value.get('keepalive_enabled')) is not bool:
+                raise ValueError()
+            return value['keepalive_enabled']
+        except FileNotFoundError:
+            return True  # Existing installations resume using their saved credentials.
+        except (OSError, ValueError):
+            raise ValueError('保活开关记录无法读取，已暂停；请点击“开始保活”重新开启。') from None
+
+    def save(self, enabled: bool):
+        if type(enabled) is not bool:
+            raise ValueError('保活开关必须为开启或关闭。')
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.path.with_suffix('.tmp')
+        temporary.write_text(json.dumps({'keepalive_enabled': enabled}), encoding='utf-8')
+        os.replace(temporary, self.path)
+
+
 class AutoStart:
     KEY = r'Software\Microsoft\Windows\CurrentVersion\Run'
     NAME = 'SZUCampusKeepalive'

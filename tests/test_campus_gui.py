@@ -21,9 +21,16 @@ class GuiTests(unittest.TestCase):
         self.tray = Mock()
         self.tray.ensure_visible.return_value = True
         self.tray.update_tooltip.return_value = True
+        self.workers = []
+        def make_worker(settings, emit, once=False, allow_login=True):
+            worker = Mock(once=once, allow_login=allow_login, settings=settings, emit=emit)
+            self.workers.append(worker)
+            return worker
+        self.worker_factory = Mock(side_effect=make_worker)
         self.patches = [patch.object(core, 'DATA_DIR', Path(self.temp.name)),
                         patch.object(core, 'SettingsStore', return_value=self.store),
                         patch.object(core, 'AutoStart', return_value=self.startup),
+                        patch.object(core, 'KeepaliveWorker', self.worker_factory),
                         patch.object(gui.campus_tray, 'TrayIcon', return_value=self.tray)]
         for p in self.patches:
             p.start()
@@ -42,6 +49,20 @@ class GuiTests(unittest.TestCase):
         for p in reversed(self.patches):
             p.stop()
         self.temp.cleanup()
+
+    def reopen(self, **options):
+        self.app.close(force=True)
+        self.root = tk.Tk()
+        self.root.withdraw()
+        with patch.object(self.root, 'after') as schedule:
+            self.app = gui.CampusApp(self.root, **options)
+        for call in schedule.call_args_list:
+            if call.args[0] == 300:
+                call.args[1]()
+        self.root.update_idletasks()
+
+    def logs(self):
+        return self.app.log_text.get('1.0', 'end')
 
     def test_startup_checkbox_reads_real_store_not_saved_preference(self):
         self.assertFalse(self.app.startup_checked.get())
@@ -134,7 +155,7 @@ class GuiTests(unittest.TestCase):
                 patch.object(core, 'KeepaliveWorker', return_value=worker) as factory:
             self.app = gui.CampusApp(self.root, autostart=True)
             callbacks = [call.args[1] for call in schedule.call_args_list if call.args[0] == 300]
-            self.assertEqual(callbacks, [self.app.start])
+            self.assertEqual(callbacks, [self.app.resume_keepalive])
             callbacks[0]()
         worker.start.assert_called_once()
         self.assertEqual(factory.call_args.args[2:], (False, True))
@@ -142,6 +163,216 @@ class GuiTests(unittest.TestCase):
         self.assertTrue(self.app.autostart)
         self.assertIn('随 Windows 登录自动启动', self.app.log_text.get('1.0', 'end'))
         self.startup.set_enabled.assert_not_called()
+
+    def test_manual_launch_automatically_uses_saved_credentials(self):
+        self.reopen()
+        self.app.worker.start.assert_called_once()
+        self.assertFalse(self.app.worker.once)
+        self.assertTrue(self.app.worker.allow_login)
+        self.assertEqual(self.app.worker.settings, self.store.load.return_value)
+        self.assertTrue(self.app.run_store.load())
+        self.store.save.assert_not_called()
+        self.startup.set_enabled.assert_not_called()
+
+    def test_exit_while_running_preserves_switch_and_next_launch_resumes(self):
+        self.app.start()
+        previous = self.app.worker
+        with patch.object(gui.messagebox, 'askyesno') as confirm:
+            self.reopen()
+        confirm.assert_not_called()
+        previous.stop.assert_called_once()
+        self.assertTrue(self.app.desired_running)
+        self.assertTrue(self.app.run_store.load())
+        self.assertIsNot(self.app.worker, previous)
+        self.app.worker.start.assert_called_once()
+
+    def test_explicit_stop_remains_paused_after_manual_and_autostart_launch(self):
+        self.app.start()
+        self.app.stop()
+        # Exit before the stopped worker's asynchronous 'done' event arrives.
+        self.reopen()
+        self.assertIsNone(self.app.worker)
+        self.assertFalse(self.app.desired_running)
+        self.reopen(autostart=True)
+        self.assertIsNone(self.app.worker)
+        self.assertFalse(self.app.run_store.load())
+        self.assertIn('上次保活为关闭状态', self.logs())
+
+    def test_explicit_start_argument_overrides_remembered_pause(self):
+        self.app.stop()
+        self.reopen(start_immediately=True)
+        self.assertIsNotNone(self.app.worker)
+        self.assertTrue(self.app.run_store.load())
+
+    def test_startup_missing_credentials_logs_without_dialog_or_worker(self):
+        for autostart in (False, True):
+            for username, password in (('', 'test-password'), ('test', ''), ('', '')):
+                with self.subTest(autostart=autostart, username=username, has_password=bool(password)):
+                    self.store.load.return_value = core.Settings(username, password)
+                    with patch.object(gui.messagebox, 'showwarning') as warning, \
+                            patch.object(gui.messagebox, 'showerror') as error:
+                        self.reopen(autostart=autostart)
+                    warning.assert_not_called()
+                    error.assert_not_called()
+                    self.assertIsNone(self.app.worker)
+                    self.assertIn('尚未保存账号或密码', self.logs())
+
+    def test_autostart_checkbox_starts_with_saved_form_and_disable_keeps_running(self):
+        self.app.stop()
+        self.app.username.set('updated-user')
+        self.app.password.set('updated-password')
+        self.app.startup_checked.set(True)
+        self.app.toggle_startup()
+        worker = self.app.worker
+        self.assertIsNotNone(worker)
+        self.assertEqual(worker.settings.username, 'updated-user')
+        self.assertEqual(worker.settings.password, 'updated-password')
+        worker.start.assert_called_once()
+        self.assertTrue(self.app.run_store.load())
+        self.app.startup_checked.set(False)
+        self.app.toggle_startup()
+        worker.stop.assert_not_called()
+        self.assertTrue(self.app.run_store.load())
+
+    def test_enabling_autostart_without_credentials_only_logs_and_saves_intent(self):
+        self.app.stop()
+        self.app.password.set('')
+        self.app.startup_checked.set(True)
+        with patch.object(gui.messagebox, 'showwarning') as warning:
+            self.app.toggle_startup()
+        warning.assert_not_called()
+        self.startup.set_enabled.assert_called_once_with(True)
+        self.assertIsNone(self.app.worker)
+        self.assertTrue(self.app.run_store.load())
+        self.assertIn('尚未保存账号或密码', self.logs())
+
+    def test_failed_autostart_registration_does_not_start_or_enable_keepalive(self):
+        self.app.stop()
+        self.startup.set_enabled.side_effect = OSError('registry failure')
+        self.app.startup_checked.set(True)
+        with patch.object(gui.messagebox, 'showerror'):
+            self.app.toggle_startup()
+        self.assertIsNone(self.app.worker)
+        self.assertFalse(self.app.run_store.load())
+
+    def test_enabling_autostart_during_one_shot_waits_then_starts_once(self):
+        self.app.stop()
+        self.app.check_now()
+        one_shot = self.app.worker
+        self.app.startup_checked.set(True)
+        self.app.toggle_startup()
+        self.assertIs(self.app.worker, one_shot)
+        self.assertTrue(self.app.pending_start)
+        self.assertEqual(len(self.workers), 1)
+        self.app.events.put(('done', None))
+        self.app.poll()
+        self.assertFalse(self.app.worker.once)
+        self.assertEqual(len(self.workers), 2)
+        self.app.worker.start.assert_called_once()
+        self.assertTrue(self.app.run_store.load())
+
+    def test_stop_cancels_a_queued_continuous_start(self):
+        self.app.check_now()
+        self.app.startup_checked.set(True)
+        self.app.toggle_startup()
+        self.app.stop()
+        self.app.events.put(('next', (10180.0, 1180.0)))
+        self.app.poll()
+        self.assertIsNone(self.app.next_check)
+        self.app.events.put(('done', None))
+        self.app.poll()
+        self.assertIsNone(self.app.worker)
+        self.assertFalse(self.app.run_store.load())
+        self.assertEqual(len(self.workers), 1)
+
+    def test_enable_during_stop_resumes_only_after_old_worker_finishes(self):
+        self.app.start()
+        previous = self.app.worker
+        self.app.stop()
+        self.app.startup_checked.set(True)
+        self.app.toggle_startup()
+        self.assertIs(self.app.worker, previous)
+        self.app.events.put(('done', None))
+        self.app.poll()
+        self.assertIsNot(self.app.worker, previous)
+        self.assertTrue(self.app.run_store.load())
+        self.assertEqual(len(self.workers), 2)
+
+    def test_one_shot_completion_does_not_change_saved_pause(self):
+        self.app.stop()
+        self.app.check_now()
+        self.app.events.put(('done', None))
+        self.app.poll()
+        self.reopen()
+        self.assertIsNone(self.app.worker)
+        self.assertFalse(self.app.run_store.load())
+
+    def test_authentication_failure_remembers_pause_for_next_launch(self):
+        self.app.start()
+        self.app.events.put(('result', core.CheckResult(False, 'needs_attention', '账号需要处理')))
+        self.app.events.put(('done', None))
+        self.app.poll()
+        self.assertFalse(self.app.run_store.load())
+        self.reopen(autostart=True)
+        self.assertIsNone(self.app.worker)
+
+    def test_duplicate_start_and_launch_callback_do_not_duplicate_workers(self):
+        self.app.start()
+        self.app.resume_keepalive()
+        self.app.startup_checked.set(True)
+        self.app.toggle_startup()
+        self.assertEqual(len(self.workers), 1)
+        self.app.worker.start.assert_called_once()
+
+    def test_stop_before_delayed_launch_callback_is_respected(self):
+        self.app.stop()
+        self.app.resume_keepalive()
+        self.assertIsNone(self.app.worker)
+        self.assertFalse(self.app.run_store.load())
+
+    def test_bad_config_is_logged_without_startup_dialog_or_overwrite(self):
+        self.store.load.side_effect = ValueError('读取配置失败')
+        with patch.object(gui.messagebox, 'showerror') as error:
+            self.reopen(autostart=True)
+        error.assert_not_called()
+        self.store.save.assert_not_called()
+        self.assertIsNone(self.app.worker)
+        self.assertIn('读取配置失败', self.logs())
+
+    def test_corrupt_switch_is_preserved_until_explicit_start(self):
+        path = Path(self.temp.name) / 'run_state.json'
+        path.write_text('{broken', encoding='utf-8')
+        self.reopen()
+        self.assertIsNone(self.app.worker)
+        self.assertIn('保活开关记录无法读取', self.logs())
+        self.assertEqual(path.read_text(), '{broken')
+        self.app.start()
+        self.assertTrue(self.app.run_store.load())
+
+    def test_failed_state_write_is_logged_without_preventing_stop(self):
+        self.app.start()
+        with patch.object(self.app.run_store, 'save', side_effect=OSError('disk failure')):
+            self.app.stop()
+        self.app.worker.stop.assert_called_once()
+        self.assertFalse(self.app.desired_running)
+        self.assertIn('保活开关未能保存', self.logs())
+
+    def test_failed_worker_start_clears_running_switch_and_allows_retry(self):
+        worker = Mock(once=False)
+        worker.start.side_effect = RuntimeError('thread creation failed')
+        with patch.object(core, 'KeepaliveWorker', return_value=worker):
+            self.app.start()
+        self.assertIsNone(self.app.worker)
+        self.assertFalse(self.app.run_store.load())
+        self.assertEqual(str(self.app.start_button.cget('state')), 'normal')
+        self.app.start()
+        self.assertIsNotNone(self.app.worker)
+
+    def test_smoke_gui_initialization_does_not_start_worker_or_write_switch(self):
+        self.reopen(initial_probe=False)
+        self.assertIsNone(self.app.worker)
+        self.assertFalse((Path(self.temp.name) / 'run_state.json').exists())
+        self.assertEqual(len(self.workers), 0)
 
     def test_other_account_keeps_running_and_shows_next_check(self):
         worker = Mock(once=False)
@@ -286,16 +517,17 @@ class GuiTests(unittest.TestCase):
         self.app.close(force=True)  # Idempotent even after Tk was destroyed.
         worker.stop.assert_called_once()
 
-    def test_cancelling_exit_restores_window_and_keeps_worker(self):
-        worker = Mock(once=False)
-        self.app.worker = worker
+    def test_exit_does_not_ask_to_turn_off_the_remembered_switch(self):
+        self.app.start()
+        worker = self.app.worker
         self.app.hide_window()
-        with patch.object(gui.messagebox, 'askyesno', return_value=False):
+        with patch.object(gui.messagebox, 'askyesno') as confirm:
             self.app.tray_action('exit')
-        self.assertFalse(self.app.closed)
-        self.assertEqual(self.root.state(), 'normal')
-        worker.stop.assert_not_called()
-        self.tray.close.assert_not_called()
+        confirm.assert_not_called()
+        self.assertTrue(self.app.closed)
+        worker.stop.assert_called_once()
+        self.tray.close.assert_called_once()
+        self.assertTrue(self.app.run_store.load())
 
     def test_missing_tray_never_leaves_window_unreachable(self):
         self.tray.ensure_visible.return_value = False
@@ -333,13 +565,14 @@ class GuiTests(unittest.TestCase):
         self.assertEqual(self.root.state(), 'withdrawn')
 
     def test_windows_shutdown_exits_without_confirmation(self):
-        worker = Mock(once=False)
-        self.app.worker = worker
+        self.app.start()
+        worker = self.app.worker
         with patch.object(gui.messagebox, 'askyesno') as confirm:
             self.app.tray_action('shutdown')
         confirm.assert_not_called()
         worker.stop.assert_called_once()
         self.assertTrue(self.app.closed)
+        self.assertTrue(self.app.run_store.load())
 
 
 if __name__ == '__main__':

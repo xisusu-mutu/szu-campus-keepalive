@@ -9,6 +9,6 @@ import test_campus_keepalive as existing
 
 def load_tests(loader, tests, pattern):
     suite = unittest.TestSuite()
-    for name in ('ParsingTests', 'EngineTests', 'ProtocolTests', 'WorkerTests'):
+    for name in ('ParsingTests', 'EngineTests', 'RunStateTests', 'ProtocolTests', 'WorkerTests'):
         suite.addTests(loader.loadTestsFromTestCase(getattr(existing, name)))
     return suite

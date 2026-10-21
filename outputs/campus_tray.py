@@ -190,7 +190,7 @@ class TrayIcon:
         commands = {1: 'show', 2: 'start', 3: 'stop', 4: 'exit'}
         try:
             for command, label in ((1, '显示窗口'), (2, '开始保活'), (3, '停止保活'),
-                                   (0, None), (4, '退出程序（停止保活）')):
+                                   (0, None), (4, '退出程序（保留保活状态）')):
                 self.api.AppendMenuW(menu, 0x800 if command == 0 else 0, command, label)
             point = wt.POINT()
             self.api.GetCursorPos(ctypes.byref(point))

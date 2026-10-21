@@ -29,6 +29,8 @@ class CampusApp:
         self.root = root
         self.autostart = autostart
         self.worker = None
+        self.stopping = False
+        self.pending_start = False
         self.events = queue.Queue()
         self.next_check = None
         self.last_result = None
@@ -37,14 +39,23 @@ class CampusApp:
         self.hidden_to_tray = False
         self.hide_notice_shown = False
         self.store = core.SettingsStore()
+        self.run_store = core.RunStateStore()
         self.startup = core.AutoStart()
         self.config_error = ''
+        self.run_state_error = ''
         try:
             settings = self.store.load()
         except ValueError as exc:
             settings = core.Settings()
             self.config_error = str(exc)
         self.settings = settings
+        try:
+            self.desired_running = self.run_store.load()
+        except ValueError as exc:
+            self.desired_running = False
+            self.run_state_error = str(exc)
+        if start_immediately:
+            self.desired_running = True
         core.DATA_DIR.mkdir(parents=True, exist_ok=True)
         self.logger = logging.getLogger('campus_gui')
         self.logger.setLevel(logging.INFO)
@@ -59,17 +70,18 @@ class CampusApp:
         self.create_tray()
         self.refresh_startup()
         launch_text = '随 Windows 登录自动启动。' if autostart else (
-            '手动启动；立即开始保活。' if start_immediately else '手动启动；保活需点击“开始保活”。')
+            '手动启动；立即开始保活。' if start_immediately else '手动启动；恢复上次的保活开关。')
         self.log('启动方式：' + launch_text)
         if self.config_error:
             self.log(self.config_error)
             self.login_state.set('配置需要重新填写')
+        if self.run_state_error:
+            self.log(self.run_state_error)
         self.root.after(100, self.poll)
         self.root.after(200, self.tick)
-        if (autostart or start_immediately) and not self.config_error:
-            self.root.after(300, self.start)
-        elif initial_probe and not self.config_error:
-            self.root.after(300, lambda: self.launch_worker(once=True, allow_login=False))
+        # The GUI smoke test disables all automatic work with initial_probe=False.
+        if initial_probe or autostart or start_immediately:
+            self.root.after(300, self.resume_keepalive)
 
     def _build_ui(self):
         root = self.root
@@ -183,7 +195,7 @@ class CampusApp:
         program = tk.Menu(menu, tearoff=False)
         program.add_command(label='隐藏到托盘', command=self.hide_window)
         program.add_separator()
-        program.add_command(label='退出程序（停止保活）', command=self.close)
+        program.add_command(label='退出程序（保留保活状态）', command=self.close)
         menu.add_cascade(label='程序', menu=program)
         root.configure(menu=menu)
 
@@ -271,8 +283,32 @@ class CampusApp:
                 self.log(f'设置已保存；正常保活间隔 {settings.interval_minutes:g} 分钟。')
             return True
         except (OSError, ValueError, KeyError) as exc:
+            self.log('设置未保存：' + str(exc))
             messagebox.showerror('设置未保存', str(exc), parent=self.root)
             return False
+
+    def remember_running(self, enabled):
+        self.desired_running = enabled
+        try:
+            self.run_store.save(enabled)
+            self.run_state_error = ''
+        except OSError:
+            self.run_state_error = '保活开关未能保存；本次操作已生效，但下次启动可能无法恢复，请检查文件权限和磁盘空间。'
+            self.log(self.run_state_error)
+
+    def resume_keepalive(self):
+        if self.closed:
+            return
+        if not self.settings.username or not self.settings.password:
+            self.log('尚未保存账号或密码，未自动开启保活；请填写后点击“开始保活”。')
+            if not self.config_error:
+                self.login_state.set('等待填写账号密码')
+            return
+        if self.desired_running:
+            self.start(automatic=True)
+        else:
+            self.running_state.set('保活：已停止（可点击开始）')
+            self.log('上次保活为关闭状态，本次保持停止。')
 
     def refresh_startup(self):
         state = self.startup.state()
@@ -288,10 +324,6 @@ class CampusApp:
         if enabled and not self.save(quiet=True):
             self.refresh_startup()
             return
-        if enabled and (not self.settings.username or not self.settings.password):
-            messagebox.showwarning('请先保存账号密码', '开机保活需要已保存的账号和密码。', parent=self.root)
-            self.refresh_startup()
-            return
         if enabled and self.startup.state() == 'different':
             if not messagebox.askyesno('更新启动项', '现有校园网启动项指向其他文件。改为启动本窗口吗？', parent=self.root):
                 self.refresh_startup()
@@ -301,11 +333,17 @@ class CampusApp:
             self.log('开机启动已' + ('开启。' if enabled else '关闭。'))
         except OSError as exc:
             messagebox.showerror('开机启动设置失败', str(exc), parent=self.root)
+            self.refresh_startup()
+            return
         self.refresh_startup()
+        if enabled:
+            self.remember_running(True)
+            self.start(automatic=True)
 
     def launch_worker(self, once=False, allow_login=True):
         if self.worker:
             return
+        self.stopping = False
         self.next_check = None
         self.worker = core.KeepaliveWorker(self.settings, lambda name, data: self.events.put((name, data)), once, allow_login)
         self.running_state.set('正在单次检查（未开启定时保活）' if once else '保活：运行中')
@@ -313,14 +351,34 @@ class CampusApp:
         self.stop_button.configure(state='normal')
         self.worker.start()
 
-    def start(self):
-        if self.worker or not self.save(quiet=True):
+    def start(self, automatic=False):
+        if self.closed or (self.worker and not self.worker.once and not self.stopping):
+            return
+        # Automatic launch uses the configuration already loaded or saved by the checkbox.
+        if not automatic and not self.save(quiet=True):
+            return
+        if self.config_error:
+            self.log('配置尚未恢复，未自动开启保活；请重新填写并保存账号密码。')
             return
         if not self.settings.username or not self.settings.password:
-            messagebox.showwarning('请填写账号密码', '填写并保存账号密码后即可开始保活。', parent=self.root)
+            self.log('尚未保存账号或密码，未开启保活；请填写后点击“开始保活”。')
+            self.login_state.set('等待填写账号密码')
+            return
+        self.remember_running(True)
+        if self.worker:
+            self.pending_start = True
+            self.log('已开启保活；当前检查结束后自动开始定时保活。')
             return
         self.log(f'开始保活：间隔 {self.settings.interval_minutes:g} 分钟；先立即检查。')
-        self.launch_worker()
+        try:
+            self.launch_worker()
+        except Exception as exc:
+            self.worker = None
+            self.remember_running(False)
+            self.running_state.set('保活：启动失败（可点击开始重试）')
+            self.start_button.configure(state='normal')
+            self.stop_button.configure(state='disabled')
+            self.log(f'保活任务启动失败（{type(exc).__name__}）。')
 
     def check_now(self):
         if self.worker:
@@ -332,12 +390,18 @@ class CampusApp:
             self.launch_worker(once=True)
 
     def stop(self):
+        self.pending_start = False
+        self.remember_running(False)
         if self.worker:
+            self.stopping = True
             self.worker.stop()
             self.next_check = None
             self.running_state.set('正在停止（等待当前网络请求结束）…')
             self.stop_button.configure(state='disabled')
             self.log('已发出停止指令。')
+        else:
+            self.running_state.set('保活：已停止（可点击开始）')
+            self.log('保活已关闭，下次启动保持停止。')
 
     def show_result(self, result):
         self.last_result = result
@@ -371,13 +435,16 @@ class CampusApp:
                 elif event == 'result':
                     self.show_result(value)
                 elif event == 'next':
-                    self.next_check = value
-                    self.log('下次检查：' + datetime.fromtimestamp(value[0]).strftime('%Y-%m-%d %H:%M:%S'))
+                    if not self.stopping:
+                        self.next_check = value
+                        self.log('下次检查：' + datetime.fromtimestamp(value[0]).strftime('%Y-%m-%d %H:%M:%S'))
                 elif event == 'error':
                     self.login_state.set('检查异常，已停止')
                     self.log(value)
                 elif event == 'done':
+                    completed = self.worker
                     self.worker = None
+                    self.stopping = False
                     self.next_check = None
                     if self.login_state.get() == '正在检查…':
                         self.login_state.set('已停止检查')
@@ -385,6 +452,11 @@ class CampusApp:
                     self.start_button.configure(state='normal')
                     self.stop_button.configure(state='disabled')
                     self.running_state.set('保活：已停止（可点击开始）')
+                    if self.pending_start:
+                        self.pending_start = False
+                        self.start(automatic=True)
+                    elif completed and not completed.once:
+                        self.remember_running(False)
         except queue.Empty:
             pass
         self.root.after(100, self.poll)
@@ -423,14 +495,16 @@ class CampusApp:
     def close(self, force=False):
         if self.closed:
             return
-        if self.worker and not self.worker.once and not force:
-            self.show_window()
-            if not messagebox.askyesno('停止并退出？', '确定停止保活并退出程序吗？', parent=self.root):
-                return
+        # Shutting down the process must not act like clicking "Stop keepalive".
+        # Start/stop persist the intended switch immediately, including during shutdown.
         if self.worker:
             self.worker.stop()
         self.closed = True
-        self.log('程序退出，保活已停止。')
+        if self.run_state_error:
+            self.log('程序退出；' + self.run_state_error)
+        else:
+            self.log('程序退出；保活开关保持' + ('开启，下次启动自动恢复。' if self.desired_running
+                                                else '关闭，下次启动保持停止。'))
         if self.tray:
             self.tray.close()
         self.logger.removeHandler(self.handler)

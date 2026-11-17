@@ -15,6 +15,7 @@ PACKAGES = {
         'outputs/campus_keepalive.py': 'campus_keepalive.py',
         'outputs/campus_core.py': 'campus_core.py',
         'outputs/campus_tray.py': 'campus_tray.py',
+        'outputs/campus_launcher.ps1': 'campus_launcher.ps1',
         'outputs/启动校园网保活.vbs': '启动校园网保活.vbs',
         'outputs/排错启动.bat': '排错启动.bat',
         'outputs/使用说明.md': 'README.md',
@@ -37,7 +38,10 @@ PACKAGES = {
 def package_files(platform, source):
     prefix = f'szu-campus-keepalive-{platform}'
     for original, target in PACKAGES[platform].items():
-        yield f'{prefix}/{target}', (source / original).read_bytes()
+        data = (source / original).read_bytes()
+        if Path(target).suffix in {'.bat', '.vbs'}:
+            data = data.replace(b'\r\n', b'\n').replace(b'\n', b'\r\n')
+        yield f'{prefix}/{target}', data
 
 
 def build_packages(destination, source=ROOT, platform='all'):

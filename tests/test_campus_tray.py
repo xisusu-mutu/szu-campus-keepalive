@@ -4,6 +4,7 @@ from pathlib import Path
 import sys
 import tkinter as tk
 import unittest
+import uuid
 from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'outputs'))
@@ -13,6 +14,11 @@ import campus_tray as tray
 @unittest.skipUnless(sys.platform == 'win32', 'Windows tray')
 class NativeTrayTests(unittest.TestCase):
     def setUp(self):
+        suffix = uuid.uuid4().hex
+        for name in ('WINDOW_CLASS', 'WINDOW_TITLE'):
+            isolation = patch.object(tray, name, 'CampusTrayTest_' + name + '_' + suffix)
+            isolation.start()
+            self.addCleanup(isolation.stop)
         self.root = tk.Tk()
         self.root.withdraw()
         self.root.update_idletasks()

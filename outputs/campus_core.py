@@ -658,7 +658,16 @@ class AutoStart:
         exe = Path(executable or sys.executable)
         windowed = exe.with_name('pythonw.exe')
         self.executable = windowed if windowed.exists() else exe
-        self.command = subprocess.list2cmdline([str(self.executable), str(self.script), '--autostart'])
+        self.required_files = [self.executable, self.script]
+        if windowed.is_file():
+            command = [str(windowed), '-E', '-s', str(self.script), '--autostart']
+        else:
+            # Console-only distributions need the same detached launch as the BAT/VBS.
+            host = Path(os.environ.get('SystemRoot', r'C:\Windows')) / 'System32' / 'wscript.exe'
+            launcher = self.script.with_name('启动校园网保活.vbs')
+            self.required_files.extend([host, launcher, self.script.with_name('campus_launcher.ps1')])
+            command = [str(host), str(launcher), '--python', str(exe), '--autostart']
+        self.command = subprocess.list2cmdline(command)
 
     def state(self) -> str:
         import winreg
@@ -673,7 +682,7 @@ class AutoStart:
 
     def set_enabled(self, enabled: bool):
         import winreg
-        if enabled and (not self.executable.is_file() or not self.script.is_file()):
+        if enabled and not all(path.is_file() for path in self.required_files):
             raise OSError('启动所需的 Python 或脚本文件不存在。')
         with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, self.KEY, 0, winreg.KEY_SET_VALUE) as key:
             if enabled:

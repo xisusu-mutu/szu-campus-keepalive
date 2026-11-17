@@ -29,6 +29,9 @@ jobs:
         run: python -B -m unittest discover -s linux/tests -v
       - name: Test independent platform downloads
         run: python -B -m unittest discover -s tests -p test_packages.py -v
+      - name: Test Windows launchers with an isolated Python installation
+        if: runner.os == 'Windows'
+        run: python -B -m unittest discover -s tests -p test_windows_launchers.py -v
       - name: Test Windows state restore and GUI with fake workers and startup stores
         if: runner.os == 'Windows'
         working-directory: tests

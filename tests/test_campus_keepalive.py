@@ -8,6 +8,7 @@ import unittest
 from unittest.mock import Mock, MagicMock, patch
 import types
 import urllib.request
+import uuid
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'outputs'))
 import campus_core as core
 
@@ -244,13 +245,26 @@ class StartupTests(unittest.TestCase):
             self.assertEqual(values,{'UnrelatedApplication':'leave-me-alone'})
 
     def test_single_instance_lock_released(self):
-        first=core.SingleInstance()
-        try:
-            self.assertFalse(first.already_running)
-            second=core.SingleInstance()
-            try: self.assertTrue(second.already_running)
-            finally: second.close()
-        finally: first.close()
+        # Keep the real Win32 mutex, but give it a test-only name so a running app is untouched.
+        kernel = core.ctypes.WinDLL('kernel32', use_last_error=True)
+        native_create = kernel.CreateMutexW
+        native_create.argtypes = [core.ctypes.c_void_p, core.wintypes.BOOL, core.wintypes.LPCWSTR]
+        native_create.restype = core.wintypes.HANDLE
+        name = 'Local\\CampusMutexTest_' + uuid.uuid4().hex
+        def create(attributes, owner, ignored_name):
+            return native_create(attributes, owner, name)
+        isolated = types.SimpleNamespace(CreateMutexW=create, CloseHandle=kernel.CloseHandle)
+        with patch.object(core.ctypes, 'WinDLL', return_value=isolated):
+            first = core.SingleInstance()
+            try:
+                self.assertFalse(first.already_running)
+                second = core.SingleInstance()
+                try: self.assertTrue(second.already_running)
+                finally: second.close()
+            finally: first.close()
+            third = core.SingleInstance()
+            try: self.assertFalse(third.already_running)
+            finally: third.close()
 
 
 class WorkerTests(unittest.TestCase):

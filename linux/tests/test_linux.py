@@ -525,7 +525,11 @@ class WebTests(ControllerCase):
 
     def test_handoff_requires_json_and_does_not_accept_extra_fields(self):
         code = self.server.launch_tickets.issue()
-        self.assertEqual(self.request('/api/ui-connect', 'POST', {'code': code}, {'Content-Type': 'text/plain'}, auth=False)[0], 400)
+        for _ in range(20):
+            status, _, body = self.request('/api/ui-connect', 'POST', {'code': code},
+                                           {'Content-Type': 'text/plain'}, auth=False)
+            self.assertEqual(status, 400)
+            self.assertIn('error', json.loads(body))
         self.assertEqual(self.request('/api/ui-connect', 'POST', {'code': code, 'url': 'https://evil.example'}, auth=False)[0], 401)
         self.assertEqual(self.request('/api/ui-ticket', 'POST', {'extra': True})[0], 400)
         self.assertTrue(self.server.launch_tickets.consume(code))

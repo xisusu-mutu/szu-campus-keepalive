@@ -329,12 +329,15 @@ class Handler(BaseHTTPRequestHandler):
         try:
             lengths = self.headers.get_all('Content-Length', [])
             if (self.headers.get('Transfer-Encoding') is not None or len(lengths) != 1 or
-                    not lengths[0].isdigit() or not 0 < int(lengths[0]) <= 16384 or
-                    self.headers.get('Content-Type', '').split(';')[0].strip() != 'application/json'):
+                    not lengths[0].isdigit() or not 0 < int(lengths[0]) <= 16384):
                 raise ValueError('需要不超过 16 KiB 的 JSON 请求。')
             payload = self.rfile.read(int(lengths[0]))
             if len(payload) != int(lengths[0]):
                 raise ValueError('请求不完整。')
+            # Drain this bounded body before rejecting its type, so closing the
+            # socket does not reset the connection and discard the JSON error.
+            if self.headers.get('Content-Type', '').split(';')[0].strip() != 'application/json':
+                raise ValueError('需要不超过 16 KiB 的 JSON 请求。')
             data = json.loads(payload)
             if not isinstance(data, dict):
                 raise ValueError('请求必须是 JSON 对象。')

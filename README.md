@@ -39,7 +39,9 @@
 python .\campus_keepalive.py
 ```
 
-启动文件优先使用 `D:\Anaconda` 中的 Python，否则使用 `pyw -3` / `py -3`；其他安装位置可直接使用上面的命令。
+启动文件自动查找当前虚拟环境、PATH、Python Launcher 和 Windows 登记的 Python 安装，并检查 Python 3.10+ 与 Tkinter。普通 Python 和 Anaconda 均可，不要求固定安装目录，也不要求安装 `py` / `pyw`。
+
+日常双击 VBS 无命令行黑框；如果电脑禁用了 VBS，使用 `排错启动.bat`。排错窗口可直接关闭，已启动的保活程序会继续运行。启动诊断保存在 `data/launcher.log`。自定义的便携式 Python 如果没有登记、也不在 PATH 中，可用环境变量 `CAMPUS_PYTHON` 指定 `python.exe` 的完整路径。
 
 已有保存的账号密码时，首次使用本版本会自动开始保活；以后普通启动和开机自启都会恢复上次的保活开关。缺少账号或密码时只在日志里提示，填写后点击“开始保活”即可保存并开始。
 

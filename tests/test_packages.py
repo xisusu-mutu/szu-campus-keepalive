@@ -48,7 +48,7 @@ class PackageTests(unittest.TestCase):
     def test_windows_contains_only_its_application_and_instructions(self):
         self.assertEqual(set(self.files('windows')), {
             'campus_core.py', 'campus_keepalive.py', 'campus_tray.py',
-            '启动校园网保活.vbs', '排错启动.bat', 'README.md',
+            '启动校园网保活.vbs', '排错启动.bat', 'campus_launcher.ps1', 'README.md',
         })
 
     def test_linux_contains_its_core_and_complete_web_interface(self):

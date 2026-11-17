@@ -141,6 +141,10 @@ class ValidationTests(unittest.TestCase):
 
 
 class ServiceTests(TempCase):
+    def install_marker(self):
+        self.paths.unit.parent.mkdir(parents=True)
+        self.paths.unit.write_text(platform.UNIT_MARKER + '\n[Service]\n', encoding='utf-8')
+
     def test_unit_does_not_contain_credentials_or_public_bind(self):
         text = platform.service_text(PurePosixPath('/some path/project/linux/campus_linux.py'),
                                      PurePosixPath('/some path/.venv/bin/python'), self.paths, 8765)
@@ -169,7 +173,8 @@ class ServiceTests(TempCase):
         startup.runner.assert_not_called()
 
     def test_enabled_without_linger_is_not_boot_enabled(self):
-        answers = ['enabled\n', 'active\n', 'no\n']
+        self.install_marker()
+        answers = [str(self.paths.unit)+'\n', 'enabled\n', 'active\n', 'no\n']
         runner = Mock(side_effect=[subprocess.CompletedProcess([], 0, text, '') for text in answers])
         with patch.object(platform.os, 'getuid', return_value=1000, create=True):
             status = platform.AutoStart(self.paths, runner).status()
@@ -177,7 +182,8 @@ class ServiceTests(TempCase):
         self.assertFalse(status['boot_enabled'])
 
     def test_enabled_with_linger_is_boot_enabled(self):
-        answers = ['enabled\n', 'active\n', 'yes\n']
+        self.install_marker()
+        answers = [str(self.paths.unit)+'\n', 'enabled\n', 'active\n', 'yes\n']
         runner = Mock(side_effect=[subprocess.CompletedProcess([], 0, text, '') for text in answers])
         with patch.object(platform.os, 'getuid', return_value=1000, create=True):
             status = platform.AutoStart(self.paths, runner).status()
@@ -185,22 +191,19 @@ class ServiceTests(TempCase):
         self.assertTrue(status['boot_enabled'])
 
     def test_startup_toggle_reads_back_only_our_user_service(self):
-        self.paths.unit.parent.mkdir(parents=True)
-        self.paths.unit.write_text(platform.UNIT_MARKER + '\n[Service]\n', encoding='utf-8')
-        answers = [(0, ''), (0, 'enabled\n'), (0, 'active\n'), (0, 'yes\n'),
-                   (0, ''), (1, 'disabled\n'), (0, 'active\n'), (0, 'yes\n')]
-        runner = Mock(side_effect=[subprocess.CompletedProcess([], code, text, '')
-                                   for code, text in answers])
+        from test_autostart import UserManager
+        self.install_marker()
+        runner = UserManager(self.paths.unit)
+        runner.enabled = False
         startup = platform.AutoStart(self.paths, runner)
         with patch.object(platform.os, 'getuid', return_value=1000, create=True):
             self.assertTrue(startup.set_enabled(True)['boot_enabled'])
+            self.assertTrue(runner.enabled)
             self.assertFalse(startup.set_enabled(False)['boot_enabled'])
-        self.assertEqual(runner.call_args_list[0].args[0],
-                         ['systemctl', '--user', 'enable', platform.UNIT_NAME])
-        self.assertEqual(runner.call_args_list[4].args[0],
-                         ['systemctl', '--user', 'disable', platform.UNIT_NAME])
+            self.assertFalse(runner.enabled)
 
     def test_status_is_cached_and_errors_are_visible(self):
+        self.install_marker()
         runner = Mock(side_effect=OSError('not installed'))
         startup = platform.AutoStart(self.paths, runner)
         self.assertTrue(startup.status()['error'])

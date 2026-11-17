@@ -16,7 +16,7 @@ import tempfile
 import threading
 import time
 
-from platform_linux import APP_NAME, UNIT_NAME, UNIT_MARKER, atomic_private_write
+from platform_linux import APP_NAME, UNIT_NAME, atomic_private_write
 
 DESKTOP_MARKER = '# Managed by szu-campus-keepalive desktop installer v1'
 DESKTOP_NAME = APP_NAME + '.desktop'
@@ -169,11 +169,8 @@ def open_panel(paths, startup, request, opener=open_browser, clock=time.monotoni
     try:
         result = ticket()
     except BackendUnavailable:
-        unit = paths.unit
-        if unit.is_symlink() or not unit.is_file() or not unit.read_text(encoding='utf-8').startswith(UNIT_MARKER + '\n'):
-            raise ValueError('尚未安装本项目的后台服务，请在 Linux 程序目录运行 python3 campus_linux.py install --desktop --open。') from None
         # systemd coalesces concurrent starts; never call Controller.start() here.
-        startup.command(['systemctl', '--user', 'start', '--no-block', UNIT_NAME])
+        startup.start_service(no_block=True)
         deadline = clock() + START_TIMEOUT
         while True:
             try:

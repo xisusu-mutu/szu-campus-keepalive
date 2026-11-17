@@ -176,7 +176,9 @@ class OpenTests(DesktopCase):
         session = patch.dict(os.environ, {'DISPLAY': ':test'}, clear=False)
         session.start()
         self.addCleanup(session.stop)
-        self.startup, self.request, self.browser = Mock(), Mock(), Mock(return_value=True)
+        from test_autostart import UserManager
+        self.startup = Mock(wraps=platform.AutoStart(self.paths, UserManager(self.paths.unit)))
+        self.request, self.browser = Mock(), Mock(return_value=True)
         self.ticket = {'app': platform.APP_NAME, 'port': 8876, 'code': 'x' * 43}
         self.request.return_value = self.ticket
 
@@ -192,21 +194,21 @@ class OpenTests(DesktopCase):
         self.assertEqual(address, 'http://127.0.0.1:8876/')
         self.browser.assert_called_once_with(address+'#launch='+self.ticket['code'])
         self.request.assert_called_once_with(self.paths, '/api/ui-ticket', {}, timeout=1.5)
-        self.startup.command.assert_not_called()
+        self.startup.start_service.assert_not_called()
         self.startup.set_enabled.assert_not_called()
 
     def test_repeated_clicks_do_not_start_additional_backends(self):
         self.launch()
         self.launch()
         self.assertEqual(self.browser.call_count, 2)
-        self.startup.command.assert_not_called()
+        self.startup.start_service.assert_not_called()
 
     def test_stopped_backend_started_once_and_waited_for(self):
         self.install_marker()
         self.request.side_effect = [desktop.BackendUnavailable(), desktop.BackendUnavailable(), self.ticket]
         pause = Mock()
         self.launch(pause=pause)
-        self.startup.command.assert_called_once_with(['systemctl', '--user', 'start', '--no-block', platform.UNIT_NAME])
+        self.startup.start_service.assert_called_once_with(no_block=True)
         self.startup.set_enabled.assert_not_called()
         pause.assert_called_once_with(0.25)
 
@@ -215,14 +217,14 @@ class OpenTests(DesktopCase):
         self.request.side_effect = desktop.BackendUnavailable()
         with self.assertRaisesRegex(ValueError, '20 秒'):
             self.launch(clock=Mock(side_effect=[0, desktop.START_TIMEOUT]), pause=Mock())
-        self.assertEqual(self.startup.command.call_count, 1)
+        self.assertEqual(self.startup.start_service.call_count, 1)
         self.browser.assert_not_called()
 
     def test_headless_open_has_no_startup_side_effects(self):
         with patch.dict(os.environ, {'DISPLAY': '', 'WAYLAND_DISPLAY': ''}), self.assertRaisesRegex(ValueError, '图形桌面'):
             self.launch()
         self.request.assert_not_called()
-        self.startup.command.assert_not_called()
+        self.startup.start_service.assert_not_called()
 
     def test_missing_or_unmanaged_unit_not_started(self):
         self.request.side_effect = desktop.BackendUnavailable()
@@ -230,17 +232,17 @@ class OpenTests(DesktopCase):
         self.paths.unit.parent.mkdir(parents=True)
         self.paths.unit.write_text('[Service]\nExecStart=unrelated\n')
         with self.assertRaises(ValueError): self.launch()
-        self.startup.command.assert_not_called()
+        self.browser.assert_not_called()
 
     def test_non_transient_errors_do_not_restart_or_mask_the_problem(self):
         self.request.side_effect = ValueError('更新后显式重启')
         with self.assertRaisesRegex(ValueError, '显式重启'): self.launch()
-        self.startup.command.assert_not_called()
+        self.startup.start_service.assert_not_called()
 
     def test_browser_failure_does_not_stop_or_reconfigure_backend(self):
         self.browser.return_value = False
         with self.assertRaisesRegex(ValueError, '浏览器'): self.launch()
-        self.startup.command.assert_not_called()
+        self.startup.start_service.assert_not_called()
         self.assertEqual(self.request.call_count, 1)
 
     def test_wrong_identity_bad_port_and_untrusted_url_are_rejected(self):
@@ -317,8 +319,8 @@ class LinuxLifecycleTests(DesktopCase):
         environment = {**os.environ, 'XDG_CONFIG_HOME': str(self.paths.config.parent),
                        'XDG_STATE_HOME': str(self.paths.state.parent)}
         child = []
-        def start(arguments):
-            self.assertEqual(arguments, ['systemctl', '--user', 'start', '--no-block', platform.UNIT_NAME])
+        def start(no_block=False):
+            self.assertTrue(no_block)
             process = subprocess.Popen([sys.executable, '-B', '-c', code, 'run', '--port', str(port), '--autostart'],
                                        env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             child.append(process)
@@ -328,11 +330,11 @@ class LinuxLifecycleTests(DesktopCase):
                 process.communicate(timeout=8)
         self.addCleanup(cleanup)
         startup, browser = Mock(), Mock(return_value=True)
-        startup.command.side_effect = start
+        startup.start_service.side_effect = start
         with patch.dict(os.environ, {'DISPLAY': ':test'}):
             desktop.open_panel(self.paths, startup, app.control_request, browser)
             desktop.open_panel(self.paths, startup, app.control_request, browser)
-        startup.command.assert_called_once()
+        startup.start_service.assert_called_once()
         self.assertIsNone(child[0].poll())
         snapshot = app.control_request(self.paths)
         self.assertFalse(snapshot['keepalive_enabled'])

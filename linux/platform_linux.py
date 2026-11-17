@@ -229,12 +229,43 @@ class AutoStart:
             raise ValueError('systemd 操作失败；请检查用户服务权限及 journalctl 日志。')
         return result
 
+    def require_service(self):
+        """A same-named user unit may belong to a different XDG configuration."""
+        unit = self.paths.unit
+        try:
+            managed = (not unit.is_symlink() and unit.is_file() and
+                       unit.read_text(encoding='utf-8').startswith(UNIT_MARKER + '\n'))
+        except (OSError, UnicodeError):
+            managed = False
+        if not managed:
+            raise ValueError('尚未安装本项目的后台服务，请在 Linux 程序目录运行 python3 campus_linux.py install --desktop --open。')
+        result = self.command(['systemctl', '--user', 'show', '--property=FragmentPath',
+                               '--value', UNIT_NAME])
+        fragment = Path(result.stdout.strip())
+        if not fragment.is_absolute() or fragment.resolve() != unit.resolve():
+            raise ValueError('systemd 中的同名服务与当前配置目录不一致；请使用已安装服务的配置目录。')
+
+    def start_service(self, no_block=False):
+        with self._lock:
+            self.require_service()
+            arguments = ['systemctl', '--user', 'start']
+            if no_block:
+                arguments.append('--no-block')
+            self.command(arguments + [UNIT_NAME])
+            self._cached = None
+
     def status(self, refresh=False):
         with self._lock:
             if not refresh and self._cached is not None and time.monotonic() - self._checked < 5:
                 return dict(self._cached)
             installed = self.paths.unit.is_file()
+            value = {'installed': installed, 'enabled': False, 'linger': False,
+                     'boot_enabled': False, 'state': 'not-installed', 'active': 'inactive', 'error': ''}
+            if not installed:
+                self._cached, self._checked = value, time.monotonic()
+                return dict(value)
             try:
+                self.require_service()
                 enabled = self.command(['systemctl', '--user', 'is-enabled', UNIT_NAME], False)
                 active = self.command(['systemctl', '--user', 'is-active', UNIT_NAME], False)
                 linger = self.command(['loginctl', 'show-user', str(os.getuid()),
@@ -254,13 +285,13 @@ class AutoStart:
     def set_enabled(self, enabled: bool):
         if type(enabled) is not bool:
             raise ValueError('开机启动开关必须是布尔值。')
-        if not self.paths.unit.is_file() or not self.paths.unit.read_text().startswith(UNIT_MARKER):
-            raise ValueError('请先运行 Linux install 命令安装本项目的用户服务。')
-        self.command(['systemctl', '--user', 'enable' if enabled else 'disable', UNIT_NAME])
-        value = self.status(refresh=True)
-        if value['error'] or value['enabled'] != enabled:
-            raise ValueError('启动项状态回读不匹配，请检查 systemd 用户服务。')
-        return value
+        with self._lock:
+            self.require_service()
+            self.command(['systemctl', '--user', 'enable' if enabled else 'disable', UNIT_NAME])
+            value = self.status(refresh=True)
+            if value['error'] or value['enabled'] != enabled:
+                raise ValueError('启动项状态回读不匹配，请检查 systemd 用户服务。')
+            return value
 
     def install(self, script: Path, executable: Path, port: int):
         unit = self.paths.unit

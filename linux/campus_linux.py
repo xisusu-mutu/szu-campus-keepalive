@@ -571,7 +571,7 @@ def main(argv=None):
         if args.enable:
             startup.set_enabled(True)
         if args.start:
-            startup.command(['systemctl', '--user', 'start', UNIT_NAME])
+            startup.start_service()
         print('用户服务已安装。开启免登录开机运行还需要 loginctl 的 Linger=yes。')
         print(json.dumps(startup.status(refresh=True), ensure_ascii=False, indent=2))
         if args.open_panel:
